@@ -1,0 +1,16 @@
+node_modules
+
+# config file (DO NOT COMMIT SECRETS)
+src/config/config.json
+
+# logs
+logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# environment leftovers (just in case you add later)
+.env
+.env.*
