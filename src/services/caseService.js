@@ -1,33 +1,94 @@
 const Counter = require("../database/models/Counter");
 const Punishment = require("../database/models/Punishment");
 
+/**
+ * Get next sequential case ID
+ */
 async function getNextCaseId() {
     const counter = await Counter.findOneAndUpdate(
         { name: "punishment_case" },
         { $inc: { value: 1 } },
-        { new: true, upsert: true }
+        {
+            new: true,
+            upsert: true,
+            returnDocument: "after"
+        }
     );
 
     return counter.value;
 }
 
-async function createCase({ guildId, userId, type, reason, moderatorId }) {
+/**
+ * Create a moderation case (single source of truth)
+ */
+async function createCase({
+    userId,
+    moderatorId,
+    type,
+    reason = "No reason provided",
+    duration = null,
+    expiresAt = null,
+    guildId = null,
+    active = true
+}) {
     const caseId = await getNextCaseId();
 
-    const newCase = await Punishment.create({
+    return Punishment.create({
         caseId,
-        guildId,
         userId,
+        moderatorId,
         type,
         reason,
-        moderatorId,
+        duration,
+        expiresAt,
+        guildId,
+        active,
         createdAt: new Date()
     });
+}
 
-    return newCase;
+/**
+ * Close a case (mark inactive)
+ */
+async function closeCase(caseId) {
+    return Punishment.findOneAndUpdate(
+        { caseId },
+        { active: false },
+        { new: true }
+    );
+}
+
+/**
+ * Get single case
+ */
+async function getCase(caseId) {
+    return Punishment.findOne({ caseId });
+}
+
+/**
+ * Get user history
+ */
+async function getUserCases(userId, limit = 10) {
+    return Punishment.find({ userId })
+        .sort({ createdAt: -1 })
+        .limit(limit);
+}
+
+/**
+ * Get all active punishments (used by expiry service)
+ */
+async function getActivePunishments(type = null) {
+    const query = { active: true };
+    if (type) query.type = type;
+
+    return Punishment.find(query);
 }
 
 module.exports = {
     getNextCaseId,
-    createCase
+    createCase,
+    closeCase,
+    getCase,
+    getUserCases,
+    getActivePunishments
 };

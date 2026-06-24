@@ -10,7 +10,7 @@ async function logCase(client, caseData) {
     if (!channel) return;
 
     const embed = new EmbedBuilder()
-        .setTitle(`Case #${caseData.caseNumber} | ${caseData.type.toUpperCase()}`)
+        .setTitle(`Case #${caseData.caseId} | ${caseData.type.toUpperCase()}`)
         .addFields(
             { name: "User", value: `<@${caseData.userId}>`, inline: true },
             { name: "Moderator", value: `<@${caseData.moderatorId}>`, inline: true },
