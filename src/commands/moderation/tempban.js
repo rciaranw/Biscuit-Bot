@@ -1,45 +1,47 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const ms = require("ms");
+
 const config = require("../../config/config.json");
 
+const Punishment = require("../../database/models/Punishment");
 const { createCase } = require("../../services/caseService");
-const { safeDm } = require("../../utils/safeDm");
 const { logCase } = require("../../utils/logCase");
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName("kick")
-        .setDescription("Kick a user from the server")
+        .setName("tempban")
+        .setDescription("Temporarily ban a user")
         .addUserOption(option =>
-            option
-                .setName("user")
-                .setDescription("User to kick")
+            option.setName("user")
+                .setDescription("User to ban")
                 .setRequired(true)
         )
         .addStringOption(option =>
-            option
-                .setName("reason")
-                .setDescription("Reason for kick")
+            option.setName("duration")
+                .setDescription("Duration (e.g. 10m, 2h, 3d)")
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName("reason")
+                .setDescription("Reason for ban")
                 .setRequired(true)
         ),
 
     async execute(interaction) {
         await interaction.deferReply({ ephemeral: true });
 
-        const staffRoleId = config.roles.staff;
-        const adminId = config.adminId;
-
         const member = interaction.member;
         const targetUser = interaction.options.getUser("user");
+        const durationInput = interaction.options.getString("duration");
         const reason = interaction.options.getString("reason");
-
-        const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
 
         // -----------------------------
         // Permission check
         // -----------------------------
         const hasPermission =
-            member.roles.cache.has(staffRoleId) ||
-            interaction.user.id === adminId;
+            member.roles.cache.has(config.roles.staff) ||
+            member.roles.cache.has(config.roles.headModerator) ||
+            interaction.user.id === config.adminId;
 
         if (!hasPermission) {
             return interaction.editReply({
@@ -48,66 +50,85 @@ module.exports = {
         }
 
         // -----------------------------
-        // Self kick protection
+        // Parse duration
         // -----------------------------
-        if (targetUser.id === interaction.user.id) {
+        const durationMs = ms(durationInput);
+
+        if (!durationMs) {
             return interaction.editReply({
-                content: "You can’t kick yourself."
+                content: "Invalid duration format. Example: 10m, 2h, 3d"
             });
         }
 
         // -----------------------------
-        // Admin protection
+        // 30 day limit
         // -----------------------------
-        if (targetUser.id === adminId) {
+        const maxDuration = 30 * 24 * 60 * 60 * 1000;
+
+        if (durationMs > maxDuration) {
             return interaction.editReply({
-                content: "You can’t kick the admin."
+                content: "Tempban limit is 30 days."
             });
         }
+
+        const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
 
         if (!targetMember) {
             return interaction.editReply({
-                content: "User is not in this server."
+                content: "User not found in this server."
             });
         }
 
         // -----------------------------
-        // Kick action
+        // Ban user
         // -----------------------------
-        await targetMember.kick(reason).catch(() => null);
+        await targetMember.ban({
+            reason: `${reason} | Tempban by ${interaction.user.tag} for ${durationInput}`
+        });
 
         // -----------------------------
         // Create case
         // -----------------------------
         const caseData = await createCase({
+            guildId: interaction.guild.id,
             userId: targetUser.id,
-            moderatorId: interaction.user.id,
-            type: "kick",
+            type: "tempban",
             reason,
-            duration: null,
-            expiresAt: null
+            moderatorId: interaction.user.id
         });
 
         // -----------------------------
-        // DM user (best effort)
+        // Save expiry record
         // -----------------------------
-        await safeDm(targetUser, {
-            content:
-                `You were kicked from **${interaction.guild.name}**\n` +
-                `Reason: ${reason}\n` +
-                `Case #${caseData.caseId}`
-        });
+        await Punishment.findOneAndUpdate(
+            { caseId: caseData.caseId },
+            {
+                expiresAt: new Date(Date.now() + durationMs),
+                duration: durationInput,
+                active: true
+            }
+        );
 
         // -----------------------------
-        // Log case
+        // Log to mod channel
         // -----------------------------
         await logCase(interaction.client, caseData);
 
         // -----------------------------
-        // Reply to moderator
+        // Response
         // -----------------------------
+        const embed = new EmbedBuilder()
+            .setTitle("Tempban Issued")
+            .setColor(0xe74c3c)
+            .addFields(
+                { name: "User", value: targetUser.tag, inline: true },
+                { name: "Duration", value: durationInput, inline: true },
+                { name: "Reason", value: reason, inline: false },
+                { name: "Case", value: `#${caseData.caseId}`, inline: true }
+            );
+
         return interaction.editReply({
-            content: `User ${targetUser.tag} has been kicked. Case #${caseData.caseId}`
+            embeds: [embed]
         });
     }
 };

@@ -4,6 +4,7 @@ const commandHandler = require("./handlers/commandHandler");
 const eventHandler = require("./handlers/eventHandler");
 const connectDatabase = require("./database/connect");
 const { startPunishmentExpiryService } = require("./services/punishmentExpiryService");
+const { startMemberPromotionService } = require("./services/memberPromotionService");
 
 const config = require("./config/config.json");
 
@@ -32,4 +33,5 @@ client.commands = new Collection();
     await client.login(config.token);
 
     startPunishmentExpiryService(client);
+    startMemberPromotionService(client);
 })();
