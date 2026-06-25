@@ -51,8 +51,7 @@ module.exports = {
         // =====================================================
         if (interaction.isButton()) {
 
-            const settings =
-                (await ApplicationSettings.findOne({ guildId: interaction.guild.id })) ||
+            const settings = (await ApplicationSettings.findOne({ guildId: interaction.guild.id })) ||
                 await ApplicationSettings.create({ guildId: interaction.guild.id });
 
             const blacklist = await ApplicationBlacklist.findOne({
@@ -82,31 +81,36 @@ module.exports = {
 
                 const q1 = new TextInputBuilder()
                     .setCustomId("q1")
-                    .setLabel("Why join the Moderation Team?")
+                    .setLabel("Question 1")
+                    .setPlaceholder("Why do you want to join the Staff Team?")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
                 const q2 = new TextInputBuilder()
                     .setCustomId("q2")
-                    .setLabel("Moderation experience?")
+                    .setLabel("Question 2")
+                    .setPlaceholder("Do you have any moderation experience? If yes, please specify.")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
                 const q3 = new TextInputBuilder()
                     .setCustomId("q3")
-                    .setLabel("Commitment to activity?")
+                    .setLabel("Question 3")
+                    .setPlaceholder("Are you able to stay active within the community?")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
                 const s1 = new TextInputBuilder()
                     .setCustomId("s1")
-                    .setLabel("Scenario: rule breaker")
+                    .setLabel("Question 4")
+                    .setPlaceholder("If a member repeatedly spams in the server, what would you do, any why?")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
                 const s2 = new TextInputBuilder()
                     .setCustomId("s2")
-                    .setLabel("Scenario: conflict")
+                    .setLabel("Question 5")
+                    .setPlaceholder("A member has been homophobic, what actions would you take?")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
@@ -144,25 +148,29 @@ module.exports = {
 
                 const q1 = new TextInputBuilder()
                     .setCustomId("q1")
-                    .setLabel("Why become a Community Helper?")
+                    .setLabel("Question 1")
+                    .setPlaceholder("Why do you want to become a Community Helper?")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
                 const q2 = new TextInputBuilder()
                     .setCustomId("q2")
-                    .setLabel("Responsibilities?")
+                    .setLabel("Question 2")
+                    .setPlaceholder("What do you think the responsibilities of this role are?")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
                 const q3 = new TextInputBuilder()
                     .setCustomId("q3")
-                    .setLabel("Activity level?")
-                    .setStyle(TextInputStyle.Paragraph)
+                    .setLabel("Question 3")
+                    .setPlaceholder("How active can you be within the community?")
+                    .setStyle(TextInputStyle.Short)
                     .setRequired(true);
 
                 const q4 = new TextInputBuilder()
                     .setCustomId("q4")
-                    .setLabel("Role understanding?")
+                    .setLabel("Question 4")
+                    .setPlaceholder("Community Helpers are not Staff. You are only there to help them. Do you understand this?")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
@@ -310,18 +318,45 @@ module.exports = {
                     answers
                 });
 
-                const channel = interaction.guild.channels.cache.get(config.staffApplications);
+                // Build embed dynamically based on type
+                let embed;
+                if (type === "staff") {
+                    embed = new EmbedBuilder()
+                        .setTitle("Staff Application")
+                        .setColor(0xe67e22)
+                        .addFields(
+                            { name: "User", value: interaction.user.tag },
+                            { name: "Why would you like to join the Moderation Team?", value: answers.q1, inline: false },
+                            { name: "Do you have any Moderation experience? If yes, provide some examples.", value: answers.q2, inline: false },
+                            { name: "Moderators are required to stay active...", value: answers.q3, inline: false },
+                            { name: "Scenario 1: A user is breaking a major rule publicly...", value: answers.s1, inline: false },
+                            { name: "Scenario 2: Two members are having a heated argument...", value: answers.s2, inline: false },
+                            { name: "Punishments", value: String(punishmentCount), inline: true }
+                        );
+                } else if (type === "helper") {
+                    embed = new EmbedBuilder()
+                        .setTitle("Community Helper Application")
+                        .setColor(0x3498db)
+                        .addFields(
+                            { name: "User", value: interaction.user.tag },
+                            { name: "Why would you like to become a Community Helper?", value: answers.q1, inline: false },
+                            { name: "What do you think the responsibilities of a Community Helper are?", value: answers.q2, inline: false },
+                            { name: "How active are you within the community?", value: answers.q3, inline: false },
+                            { name: "A Community Helper is NOT a moderator...", value: answers.q4, inline: false },
+                            { name: "Punishments", value: String(punishmentCount), inline: true }
+                        );
+                }
 
-                const embed = new EmbedBuilder()
-                    .setTitle(`${type === "staff" ? "Staff" : "Community Helper"} Application`)
-                    .setColor(type === "staff" ? 0xe67e22 : 0x3498db)
-                    .addFields(
-                        { name: "User", value: interaction.user.tag },
-                        { name: "Punishments", value: String(punishmentCount) }
-                    )
-                    .setTimestamp();
+                // Send to the staff applications channel
+                const channel = await interaction.guild.channels.fetch(config.channels.staffApplications);
+                if (!channel || typeof channel.send !== 'function') {
+                    return interaction.reply({
+                        content: "Applications channel is missing or not accessible.",
+                        ephemeral: true
+                    });
+                }
 
-                channel.send({
+                await channel.send({
                     embeds: [embed],
                     components: [
                         {
