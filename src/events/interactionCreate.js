@@ -1,253 +1,79 @@
+console.log("INTERACTION CREATE FILE LOADED.");
+//console.log("COMMAND MAP SIZE:", client.commands?.size);
+
 const {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
     ActionRowBuilder,
-    EmbedBuilder
+    EmbedBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ChannelType,
+    PermissionFlagsBits,
+    PermissionOverwrites
 } = require("discord.js");
 
-const config = require("../config/config.json");
+const config = require("../utils/config");
 
 const Application = require("../database/models/Application");
 const ApplicationBlacklist = require("../database/models/ApplicationBlacklist");
 const ApplicationSettings = require("../database/models/ApplicationSettings");
 const Punishment = require("../database/models/Punishment");
 
+const { closeTicket } = require("../utils/closeTicket");
+
+const {
+    createTicket,
+    getOpenTicketForUser,
+    formatTicketId
+} = require("../services/ticketService")
+
 module.exports = {
     name: "interactionCreate",
-
     async execute(interaction, client) {
 
-        // =====================================================
-        // SLASH COMMANDS
-        // =====================================================
-        if (interaction.isChatInputCommand()) {
+        try {
 
-            const command = client.commands.get(interaction.commandName);
-            if (!command) return;
+            // =========================
+            // DEBUG (KEEP THIS)
+            // =========================
+            console.log("INTERACTION:", interaction.type, interaction.commandName || interaction.customId);
 
-            try {
-                await command.execute(interaction, client);
-            } catch (err) {
-                console.error(err);
+            // =========================
+            // SLASH COMMANDS
+            // =========================
+            if (interaction.isChatInputCommand()) {
 
-                const reply = {
-                    content: "Command execution failed.",
-                    ephemeral: true
-                };
+                const command = client.commands.get(interaction.commandName);
 
-                if (interaction.replied || interaction.deferred) {
-                    return interaction.followUp(reply);
-                } else {
-                    return interaction.reply(reply);
+                if (!command) {
+                    console.log("Command not found:", interaction.commandName);
+                    return interaction.reply({
+                        content: "Command not found.",
+                        ephemeral: true
+                    });
                 }
+
+                return await command.execute(interaction, client);
             }
 
-            return;
-        }
+            // =========================
+            // SELECT MENU (TICKETS)
+            // =========================
+            if (interaction.isStringSelectMenu()) {
 
-        // =====================================================
-        // BUTTONS (APPLICATION ENTRY)
-        // =====================================================
-        if (interaction.isButton()) {
+                if (interaction.customId !== "ticket_create") return;
 
-            const settings = (await ApplicationSettings.findOne({ guildId: interaction.guild.id })) ||
-                await ApplicationSettings.create({ guildId: interaction.guild.id });
-
-            const blacklist = await ApplicationBlacklist.findOne({
-                userId: interaction.user.id
-            });
-
-            // ---------------- STAFF APPLY ----------------
-            if (interaction.customId === "apply_staff") {
-
-                if (blacklist) {
-                    return interaction.reply({
-                        content: "You are blacklisted from applying.",
-                        ephemeral: true
-                    });
-                }
-
-                if (!settings.staffApplicationsOpen) {
-                    return interaction.reply({
-                        content: "Staff applications are currently closed.",
-                        ephemeral: true
-                    });
-                }
+                const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require("discord.js");
 
                 const modal = new ModalBuilder()
-                    .setCustomId("modal_staff_application")
-                    .setTitle("Staff Application");
-
-                const q1 = new TextInputBuilder()
-                    .setCustomId("q1")
-                    .setLabel("Question 1")
-                    .setPlaceholder("Why do you want to join the Staff Team?")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                const q2 = new TextInputBuilder()
-                    .setCustomId("q2")
-                    .setLabel("Question 2")
-                    .setPlaceholder("Do you have any moderation experience? If yes, please specify.")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                const q3 = new TextInputBuilder()
-                    .setCustomId("q3")
-                    .setLabel("Question 3")
-                    .setPlaceholder("Are you able to stay active within the community?")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                const s1 = new TextInputBuilder()
-                    .setCustomId("s1")
-                    .setLabel("Question 4")
-                    .setPlaceholder("If a member repeatedly spams in the server, what would you do, any why?")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                const s2 = new TextInputBuilder()
-                    .setCustomId("s2")
-                    .setLabel("Question 5")
-                    .setPlaceholder("A member has been homophobic, what actions would you take?")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                modal.addComponents(
-                    new ActionRowBuilder().addComponents(q1),
-                    new ActionRowBuilder().addComponents(q2),
-                    new ActionRowBuilder().addComponents(q3),
-                    new ActionRowBuilder().addComponents(s1),
-                    new ActionRowBuilder().addComponents(s2)
-                );
-
-                return interaction.showModal(modal);
-            }
-
-            // ---------------- HELPER APPLY ----------------
-            if (interaction.customId === "apply_helper") {
-
-                if (blacklist) {
-                    return interaction.reply({
-                        content: "You are blacklisted from applying.",
-                        ephemeral: true
-                    });
-                }
-
-                if (!settings.helperApplicationsOpen) {
-                    return interaction.reply({
-                        content: "Community Helper applications are currently closed.",
-                        ephemeral: true
-                    });
-                }
-
-                const modal = new ModalBuilder()
-                    .setCustomId("modal_helper_application")
-                    .setTitle("Community Helper Application");
-
-                const q1 = new TextInputBuilder()
-                    .setCustomId("q1")
-                    .setLabel("Question 1")
-                    .setPlaceholder("Why do you want to become a Community Helper?")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                const q2 = new TextInputBuilder()
-                    .setCustomId("q2")
-                    .setLabel("Question 2")
-                    .setPlaceholder("What do you think the responsibilities of this role are?")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                const q3 = new TextInputBuilder()
-                    .setCustomId("q3")
-                    .setLabel("Question 3")
-                    .setPlaceholder("How active can you be within the community?")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true);
-
-                const q4 = new TextInputBuilder()
-                    .setCustomId("q4")
-                    .setLabel("Question 4")
-                    .setPlaceholder("Community Helpers are not Staff. You are only there to help them. Do you understand this?")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-
-                modal.addComponents(
-                    new ActionRowBuilder().addComponents(q1),
-                    new ActionRowBuilder().addComponents(q2),
-                    new ActionRowBuilder().addComponents(q3),
-                    new ActionRowBuilder().addComponents(q4)
-                );
-
-                return interaction.showModal(modal);
-            }
-
-            // ---------------- ACCEPT / DENY ----------------
-            if (interaction.customId.startsWith("app_accept_") ||
-                interaction.customId.startsWith("app_deny_")) {
-
-                const member = interaction.member;
-
-                const allowed =
-                    member.roles.cache.has(config.roles.headModerator) ||
-                    member.roles.cache.has(config.roles.ciaran) ||
-                    interaction.user.id === config.adminId;
-
-                if (!allowed) {
-                    return interaction.reply({
-                        content: "No permission.",
-                        ephemeral: true
-                    });
-                }
-
-                const appId = interaction.customId.split("_").slice(2).join("_");
-                const application = await Application.findById(appId);
-
-                if (!application) {
-                    return interaction.reply({
-                        content: "Application not found.",
-                        ephemeral: true
-                    });
-                }
-
-                const guildMember = await interaction.guild.members.fetch(application.userId).catch(() => null);
-
-                // ---------------- ACCEPT ----------------
-                if (interaction.customId.startsWith("app_accept_")) {
-
-                    if (guildMember) {
-                        if (application.type === "staff") {
-                            await guildMember.roles.add(config.roles.staff);
-                            await guildMember.roles.add(config.roles.moderator);
-                        }
-
-                        if (application.type === "helper") {
-                            await guildMember.roles.add(config.roles.communityHelper);
-                        }
-                    }
-
-                    application.status = "accepted";
-                    application.reviewedBy = interaction.user.id;
-                    application.reviewedAt = new Date();
-                    await application.save();
-
-                    return interaction.update({
-                        content: "Application accepted.",
-                        components: [],
-                        embeds: interaction.message.embeds
-                    });
-                }
-
-                // ---------------- DENY (MODAL) ----------------
-                const modal = new ModalBuilder()
-                    .setCustomId(`deny_reason_${appId}`)
-                    .setTitle("Deny Application");
+                    .setCustomId(`ticket_modal_${interaction.values[0]}`)
+                    .setTitle("Open Ticket");
 
                 const reason = new TextInputBuilder()
                     .setCustomId("reason")
-                    .setLabel("Reason")
+                    .setLabel("Why are you opening this ticket?")
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
@@ -257,168 +83,247 @@ module.exports = {
 
                 return interaction.showModal(modal);
             }
-        }
 
-        // =====================================================
-        // MODALS (APPLICATION SUBMISSION + DENY REASON)
-        // =====================================================
-        if (interaction.isModalSubmit()) {
+            // =========================
+            // MODALS (TICKETS)
+            // =========================
+            if (interaction.isModalSubmit()) {
 
-            // ---------------- STAFF SUBMIT ----------------
-            if (interaction.customId === "modal_staff_application" ||
-                interaction.customId === "modal_helper_application") {
+                try {
+                    console.log("MODAL RECEIVED:", interaction.customId);
 
-                const type =
-                    interaction.customId === "modal_staff_application"
-                        ? "staff"
-                        : "helper";
+                    if (!interaction.customId.startsWith("ticket_modal_")) return;
 
-                const answers = {};
-                interaction.fields.fields.forEach((f) => {
-                    answers[f.customId] = f.value;
-                });
+                    const type = interaction.customId.replace("ticket_modal_", "");
+                    const reason = interaction.fields.getTextInputValue("reason");
 
-                const blacklist = await ApplicationBlacklist.findOne({
-                    userId: interaction.user.id
-                });
+                    console.log("TICKET TYPE:", type);
+                    console.log("REASON:", reason);
 
-                if (blacklist) {
-                    return interaction.reply({
-                        content: "You are blacklisted from applying.",
-                        ephemeral: true
+                    const existing = await getOpenTicketForUser(interaction.user.id);
+
+                    if (existing) {
+                        return interaction.reply({
+                            content: "You already have an open ticket.",
+                            ephemeral: true
+                        });
+                    }
+
+                    await interaction.deferReply({ ephemeral: true });
+
+                    const ticket = await createTicket({
+                        guildId: interaction.guild.id,
+                        userId: interaction.user.id,
+                        type,
+                        reason,
+                        channelId: null
                     });
-                }
 
-                const settings = await ApplicationSettings.findOne({
-                    guildId: interaction.guild.id
-                });
+                    console.log("TICKET CREATED IN DB:", ticket.ticketId);
 
-                if (type === "staff" && !settings.staffApplicationsOpen) {
-                    return interaction.reply({
-                        content: "Staff applications are closed.",
-                        ephemeral: true
-                    });
-                }
+                    const formattedId = formatTicketId(ticket.ticketId);
 
-                if (type === "helper" && !settings.helperApplicationsOpen) {
-                    return interaction.reply({
-                        content: "Helper applications are closed.",
-                        ephemeral: true
-                    });
-                }
+                    const supportCategory = config.channels.supportCategory;
 
-                const punishmentCount = await Punishment.countDocuments({
-                    userId: interaction.user.id
-                });
+                    console.log("SUPPORT CATEGORY:", supportCategory);
 
-                const application = await Application.create({
-                    userId: interaction.user.id,
-                    guildId: interaction.guild.id,
-                    type,
-                    answers
-                });
+                    const helperRole = config.roles.communityHelper;
+                    const staffRole = config.roles.staff;
 
-                // Build embed dynamically based on type
-                let embed;
-                if (type === "staff") {
-                    embed = new EmbedBuilder()
-                        .setTitle("Staff Application")
-                        .setColor(0xe67e22)
-                        .addFields(
-                            { name: "User", value: interaction.user.tag },
-                            { name: "Why would you like to join the Moderation Team?", value: answers.q1, inline: false },
-                            { name: "Do you have any Moderation experience? If yes, provide some examples.", value: answers.q2, inline: false },
-                            { name: "Moderators are required to stay active...", value: answers.q3, inline: false },
-                            { name: "Scenario 1: A user is breaking a major rule publicly...", value: answers.s1, inline: false },
-                            { name: "Scenario 2: Two members are having a heated argument...", value: answers.s2, inline: false },
-                            { name: "Punishments", value: String(punishmentCount), inline: true }
-                        );
-                } else if (type === "helper") {
-                    embed = new EmbedBuilder()
-                        .setTitle("Community Helper Application")
-                        .setColor(0x3498db)
-                        .addFields(
-                            { name: "User", value: interaction.user.tag },
-                            { name: "Why would you like to become a Community Helper?", value: answers.q1, inline: false },
-                            { name: "What do you think the responsibilities of a Community Helper are?", value: answers.q2, inline: false },
-                            { name: "How active are you within the community?", value: answers.q3, inline: false },
-                            { name: "A Community Helper is NOT a moderator...", value: answers.q4, inline: false },
-                            { name: "Punishments", value: String(punishmentCount), inline: true }
-                        );
-                }
+                    const channel = await interaction.guild.channels.create({
+                        name: `ticket-${formattedId}`,
+                        parent: supportCategory,
 
-                // Send to the staff applications channel
-                const channel = await interaction.guild.channels.fetch(config.channels.staffApplications);
-                if (!channel || typeof channel.send !== 'function') {
-                    return interaction.reply({
-                        content: "Applications channel is missing or not accessible.",
-                        ephemeral: true
-                    });
-                }
-
-                await channel.send({
-                    embeds: [embed],
-                    components: [
-                        {
-                            type: 1,
-                            components: [
-                                {
-                                    type: 2,
-                                    style: 3,
-                                    label: "Accept",
-                                    custom_id: `app_accept_${application._id}`
-                                },
-                                {
-                                    type: 2,
-                                    style: 4,
-                                    label: "Deny",
-                                    custom_id: `app_deny_${application._id}`
-                                }
-                            ]
-                        }
-                    ]
-                });
-
-                return interaction.reply({
-                    content: "Application submitted.",
-                    ephemeral: true
-                });
-            }
-
-            // ---------------- DENY REASON ----------------
-            if (interaction.customId.startsWith("deny_reason_")) {
-
-                const appId = interaction.customId.replace("deny_reason_", "");
-                const reason = interaction.fields.getTextInputValue("reason");
-
-                const application = await Application.findById(appId);
-                if (!application) return;
-
-                const user = await interaction.client.users.fetch(application.userId).catch(() => null);
-
-                if (user) {
-                    user.send({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle("Application Denied")
-                                .setColor(0xe74c3c)
-                                .setDescription(`Reason: ${reason}`)
+                        permissionOverwrites: [
+                            {
+                                id: interaction.guild.roles.everyone.id,
+                                deny: ["ViewChannel"]
+                            },
+                            {
+                                id: interaction.user.id,
+                                allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
+                            },
+                            {
+                                id: helperRole,
+                                allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
+                            },
+                            {
+                                id: staffRole,
+                                allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
+                            }
                         ]
-                    }).catch(() => {});
+                    });
+
+                    console.log("CHANNEL CREATED:", channel.id);
+                    console.log("ABOUT TO SEND MESSAGE...");
+
+                    ticket.channelId = channel.id;
+                    await ticket.save();
+
+                    await interaction.editReply({
+                        content: `Ticket created: ${channel}`
+                    });
+
+                    const embed = new EmbedBuilder()
+                        .setColor(0x3498db)
+                        .setTitle(`Support Ticket: ${type}`)
+                        .setDescription("The Staff Team and Community Helpers have been notified of your ticket. Please wait for someone to help you. Please do not ping members of the team.\n\nIf you have any additional information for them, please provide it now.")
+                        .addFields(
+                            {
+                                name: "Ticket ID",
+                                value: `#${formattedId}`,
+                                inline: true
+                            },
+                            {
+                                name: "Opened By",
+                                value: `<@${interaction.user.id}>`,
+                                inline: true
+                            },
+                            {
+                                name: "Reason",
+                                value: reason
+                            }
+                        );
+
+                    const buttons = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`ticket_refer_${formattedId}`)
+                            .setLabel("Refer to Staff")
+                            .setStyle(ButtonStyle.Primary),
+
+                        new ButtonBuilder()
+                            .setCustomId(`ticket_close_${formattedId}`)
+                            .setLabel("Close Ticket")
+                            .setStyle(ButtonStyle.Danger)
+                    );
+
+                    const msg = await channel.send({
+                        content: `<@${interaction.user.id}> <@&${helperRole}>`,
+                        embeds: [embed],
+                        components: [buttons]
+                    });
+
+                    console.log("MESSAGE SENT:", msg.id);
+
+                    return;
+
+                } catch (err) {
+                    console.error("MODAL ERROR:", err);
+
+                    if (interaction.deferred || interaction.replied) {
+                        return interaction.editReply({
+                            content: "Ticket creation failed."
+                        });
+                    }
+                    return interaction.reply({
+                        content: "Ticket creation failed.,",
+                        ephemeral: true
+                    });
+                }
+            }
+            // =========================
+            // BUTTONS
+            // =========================
+            if (interaction.isButton()) {
+
+                const Ticket = require("../database/models/Ticket");
+                const config = require("../utils/config");
+                const { closeTicket } = require("../utils/closeTicket");
+
+                const ticket = await Ticket.findOne({
+                    channelId: interaction.channel.id
+                });
+
+                if (!ticket) {
+                    return interaction.reply({
+                        content: "Ticket not found.",
+                        ephemeral: true
+                    });
                 }
 
-                application.status = "denied";
-                application.reviewedBy = interaction.user.id;
-                application.reviewedAt = new Date();
-                application.reviewReason = reason;
+                // =========================
+                // REFER
+                // =========================
+                if (interaction.customId.startsWith("ticket_refer_")) {
 
-                await application.save();
+                    if (ticket.referred) {
+                        return interaction.reply({
+                            content: "Already referred.",
+                            ephemeral: true
+                        });
+                    }
 
-                return interaction.reply({
-                    content: "Application denied.",
-                    ephemeral: true
-                });
+                    ticket.referred = true;
+                    await ticket.save();
+
+                    await interaction.channel.send({
+                        content: `<@&${config.roles.staff}> This ticket has been referred to the Staff Team. Please wait for one of them to respond.`
+                    });
+
+                    return interaction.reply({
+                        content: "Ticket referred.",
+                        ephemeral: true
+                    });
+                }
+
+                // =========================
+                // CANCEL
+                // =========================
+                if (interaction.customId.startsWith("ticket_close_cancel_")) {
+
+                    return interaction.update({
+                        content: "Ticket close cancelled.",
+                        components: []
+                    });
+                }
+
+                // =========================
+                // CONFIRM
+                // =========================
+                if (interaction.customId.startsWith("ticket_close_confirm_")) {
+
+                    await interaction.update({
+                        content: "Closing ticket...",
+                        components: []
+                    });
+
+                    return closeTicket(interaction);
+                }
+
+                // =========================
+                // CLOSE BUTTON
+                // =========================
+                if (interaction.customId.startsWith("ticket_close_")) {
+
+                    return interaction.reply({
+                        content: "Are you sure you want to close this ticket?",
+                        ephemeral: true,
+                        components: [
+                            new ActionRowBuilder().addComponents(
+                                new ButtonBuilder()
+                                    .setCustomId(`ticket_close_confirm_${ticket.ticketId}`)
+                                    .setLabel("Yes, close it")
+                                    .setStyle(ButtonStyle.Danger),
+
+                                new ButtonBuilder()
+                                    .setCustomId(`ticket_close_cancel_${ticket.ticketId}`)
+                                    .setLabel("Cancel")
+                                    .setStyle(ButtonStyle.Secondary)
+                            )
+                        ]
+                    });
+                }
             }
+
+        } catch (err) {
+            console.error("INTERACTION ERROR:", err);
+
+            if (interaction.replied || interaction.deferred) return;
+
+            return interaction.reply({
+                content: "Something went wrong.",
+                ephemeral: true
+            });
         }
     }
 };
