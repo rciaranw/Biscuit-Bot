@@ -3,48 +3,66 @@ const {
     EmbedBuilder
 } = require("discord.js");
 
-const { getShopItems } = require("../../services/shopService");
+const {
+    getAllItems
+} = require("../../economy/shop/shopCatalog");
+
+const {
+    buyItem
+} = require("../../economy/shop/shopEngine");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("shop")
-        .setDescription("View the Twinkie shop"),
+        .setDescription("View or buy items")
+        .addStringOption(opt =>
+            opt.setName("item")
+                .setDescription("Item to buy")
+                .setRequired(false)
+                .addChoices(
+                    ...getAllItems().map(i => ({
+                        name: `${i.name} - ${i.price} Twinkies`,
+                        value: i.id
+                    }))
+                )
+        ),
 
-    async execute(interaction) {
+    async execute(interaction, client) {
 
-        const items = await getShopItems();
+        const itemId = interaction.options.getString("item");
 
-        if (!items.length) {
+        // VIEW SHOP
+        if (!itemId) {
+
+            const items = getAllItems();
+
+            const embed = new EmbedBuilder()
+                .setTitle("🏪 Biscuit Shop")
+                .setColor(0xf1c40f)
+                .setDescription(
+                    items.map(i =>
+                        `**${i.name}** - ${i.price} Twinkies\n_${i.description}_`
+                    ).join("\n\n")
+                );
+
             return interaction.reply({
-                content: "The shop is empty.",
-                ephemeral: true
+                embeds: [embed]
             });
         }
 
-        const embed = new EmbedBuilder()
-            .setTitle("🏪 Twinkie Shop")
-            .setColor(0xf1c40f)
-            .setDescription(
-                items.map(item => {
+        // BUY ITEM
+        const result = await buyItem(interaction.user.id, itemId, client);
 
-                    const stock =
-                        item.stock === -1
-                            ? "∞"
-                            : item.stock <= 0
-                                ? "OUT OF STOCK"
-                                : item.stock;
-
-                    return [
-                        `**${item.name}**`,
-                        `${item.description}`,
-                        `💰 ${item.price} Twinkies | 📦 Stock: ${stock}`,
-                        `ID: \`${item._id}\``
-                    ].join("\n");
-                }).join("\n\n")
-            );
+        if (!result.ok) {
+            return interaction.reply({
+                content: `❌ ${result.reason}`,
+                ephemeral: false
+            });
+        }
 
         return interaction.reply({
-            embeds: [embed]
+            content: `🛒 You bought **${result.item}** for ${result.price} Twinkies`,
+            ephemeral: false
         });
     }
 };

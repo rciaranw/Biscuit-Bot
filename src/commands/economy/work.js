@@ -1,75 +1,133 @@
-const { SlashCommandBuilder } = require("discord.js");
-const { getUser, addWallet } = require("../../services/economyService");
+const {
+    SlashCommandBuilder,
+    EmbedBuilder
+} = require("discord.js");
 
-const SIX_HOURS = 6 * 60 * 60 * 1000;
+const EconomyUser = require("../../database/models/EconomyUser");
 
-const jobs = [
-    "You argued with a customer about whether Twinkies are a currency. You won. Somehow.",
-    "You worked as a Tesco self-checkout assistant and judged everyone silently.",
-    "You helped an old man find the milk aisle. He tipped you emotionally.",
-    "You cleaned a pub table so aggressively it got promoted to 'reflective surface'.",
-    "You delivered food and ate only 12% of it. A personal best.",
-    "You stood in for a missing shop mannequin. Very convincing.",
-    "You ran a 5-minute consultation on someone's life choices. They left more confused.",
-    "You worked at a café and accidentally invented a new coffee by panic.",
-    "You helped stack shelves and immediately unstacked them emotionally.",
-    "You did admin work for 6 hours and produced 2 emails and a breakdown.",
-    "You worked security and told someone ‘don’t do that’ very firmly.",
-    "You mopped a floor so well it developed trust issues.",
-    "You tried your best. HR will be in touch (they won’t).",
-    "You carried boxes labelled ‘light’ that were absolutely not light.",
-    "You babysat a printer. It still misbehaved.",
-    "You worked in a pub and learned that humanity is 40% lager.",
-    "You became the unofficial IT support for a shop and fixed nothing.",
-    "You explained Wi-Fi to someone who didn’t want to understand.",
-    "You helped a tourist. You are now emotionally exhausted.",
-    "You restocked crisps and felt powerful for 4 seconds.",
-    "You worked retail and lost a small part of your soul at till 3.",
-    "You wrote a to-do list and immediately ignored it.",
-    "You answered phones professionally until your will to live expired.",
-    "You assembled furniture and achieved extra screws somehow.",
-    "You worked at a bar and survived pure chaos energy.",
-    "You convinced someone their expired coupon still worked. Respect.",
-    "You did warehouse work and now understand pain.",
-    "You trained a new employee. They quit halfway through.",
-    "You cleaned glassware and questioned your existence.",
-    "You worked a shift and mostly thought about leaving."
-];
+const {
+    getJob
+} = require("../../economy/jobs/jobRegistry");
+
+const {
+    calculateJobPay,
+    calculateTax
+} = require("../../economy/jobs/jobEngine");
+
+const {
+    depositToBank
+} = require("../../economy/bankOfBiscuit");
+
+const {
+    logMoney
+} = require("../../utils/moneyLogger");
+
+const COOLDOWN = 6 * 60 * 60 * 1000;
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("work")
-        .setDescription("Work to earn Twinkies (6 hour cooldown)."),
+        .setDescription("Work your job to earn Twinkies"),
 
-    async execute(interaction) {
+    async execute(interaction, client) {
 
-        const userId = interaction.user.id;
+        const user = await EconomyUser.findOne({
+            userId: interaction.user.id
+        });
 
-        const user = await getUser(userId);
-
-        const now = Date.now();
-
-        if (user.lastWork && now - user.lastWork < SIX_HOURS) {
-
-            const remaining = SIX_HOURS - (now - user.lastWork);
-            const minutes = Math.ceil(remaining / 60000);
-
+        if (!user) {
             return interaction.reply({
-                content: `🕒 You're too tired to work. Come back in **${minutes} minutes**.`,
+                content: "No economy profile found.",
                 ephemeral: false
             });
         }
 
-        const payout = Math.floor(Math.random() * 91) + 10;
-        const job = jobs[Math.floor(Math.random() * jobs.length)];
+        if (!user.job || user.job.title === "unemployed") {
+            return interaction.reply({
+                content: "❌ You need a job before you can work. Use /applyjob.",
+                ephemeral: false
+            });
+        }
 
-        user.lastWork = now;
+        const job = getJob(user.job.title);
+
+        const now = Date.now();
+        const lastWorked = user.job.lastWorkedAt || 0;
+
+        if (now - lastWorked < COOLDOWN) {
+
+            const remaining = COOLDOWN - (now - lastWorked);
+            const hours = Math.floor(remaining / (1000 * 60 * 60));
+            const minutes = Math.floor((remaining / (1000 * 60)) % 60);
+
+            return interaction.reply({
+                content: `⏳ You're too tired. Come back in **${hours}h ${minutes}m**`,
+                ephemeral: false
+            });
+        }
+
+        const grossPay = calculateJobPay(user);
+        const tax = calculateTax(grossPay, job);
+        const netPay = grossPay - tax;
+
+        // streak system
+        if (!user.job.workStreak) user.job.workStreak = 0;
+
+        if (lastWorked && now - lastWorked <= COOLDOWN) {
+            user.job.workStreak += 1;
+        } else {
+            user.job.workStreak = 1;
+        }
+
+        // level progression
+        if (user.job.workStreak % 7 === 0) {
+            user.job.level = (user.job.level || 1) + 1;
+        }
+
+        user.job.lastWorkedAt = now;
+
+        user.wallet = (user.wallet || 0) + netPay;
+
         await user.save();
 
-        await addWallet(userId, payout);
-
-        return interaction.reply({
-            content: `💼 ${job}\n\nYou earned **${payout} Twinkies**.`
+        await depositToBank(tax, "TAX", client, {
+            reason: `Income tax from ${interaction.user.id} (${job.name})`
         });
+
+        await logMoney(client, {
+            userId: interaction.user.id,
+            type: "WORK_INCOME",
+            amount: netPay,
+            walletAfter: user.wallet,
+            reason: `Worked as ${job.name}`
+        });
+
+        const responses = [
+            `You worked a shift as **${job.name}** and survived it.`,
+            `Another shift down as a **${job.name}**.`,
+            `You did the job. Barely.`,
+            `Your shift as a **${job.name}** ended without incident.`,
+            `You got paid for showing up as a **${job.name}**.`,
+            `A chaotic but profitable shift.`,
+            `You completed your work as a **${job.name}**.`,
+            `You earned your Twinkies the hard way.`,
+            `Your boss didn't fire you today.`,
+            `You clocked out as a **${job.name}**. Freedom achieved.`
+        ];
+
+        const embed = new EmbedBuilder()
+            .setColor(0x2ecc71)
+            .setTitle("💼 Work Complete")
+            .setDescription(responses[Math.floor(Math.random() * responses.length)])
+            .addFields(
+                { name: "Gross Pay", value: `${grossPay}`, inline: true },
+                { name: "Tax", value: `${tax}`, inline: true },
+                { name: "Net Pay", value: `${netPay}`, inline: true },
+                { name: "Streak", value: `${user.job.workStreak}`, inline: true },
+                { name: "Job", value: job.name, inline: true }
+            )
+            .setFooter({ text: "Bank of Biscuit collects tax revenue automatically" });
+
+        return interaction.reply({ embeds: [embed] });
     }
 };

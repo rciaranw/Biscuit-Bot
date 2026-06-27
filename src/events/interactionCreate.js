@@ -19,15 +19,6 @@ const {
     formatTicketId
 } = require("../services/ticketService");
 
-// Blackjack service
-const {
-    getGame,
-    hit,
-    stand
-} = require("../services/blackjackService");
-
-const { getUser, addWallet } = require("../services/economyService");
-
 module.exports = {
     name: "interactionCreate",
 
@@ -252,77 +243,6 @@ module.exports = {
                     }
 
                     return;
-                }
-
-                // =========================
-                // BLACKJACK ONLY
-                // =========================
-                if (id.startsWith("bj_")) {
-
-                    const userId = id.split("_")[2];
-
-                    if (interaction.user.id !== userId) {
-                        return interaction.reply({
-                            content: "This is not your game.",
-                            ephemeral: true
-                        });
-                    }
-
-                    const game = await getGame(userId);
-
-                    if (!game) {
-                        return interaction.reply({
-                            content: "Game not found.",
-                            ephemeral: true
-                        });
-                    }
-
-                    // HIT
-                    if (id.startsWith("bj_hit")) {
-
-                        const total = await hit(game);
-
-                        if (total > 21) {
-
-                            const user = await getUser(userId);
-                            user.stats.blackjack.lost += 1;
-                            await user.save();
-
-                            game.finished = true;
-                            await game.save();
-
-                            return interaction.update({
-                                content: "💥 Bust!",
-                                components: []
-                            });
-                        }
-
-                        return interaction.deferUpdate();
-                    }
-
-                    // STAND
-                    if (id.startsWith("bj_stand")) {
-
-                        const result = await stand(game);
-
-                        const user = await getUser(userId);
-
-                        if (result.result === "win") {
-                            await addWallet(userId, game.bet * 2);
-                            user.stats.blackjack.won += 1;
-                        }
-
-                        if (result.result === "lose") {
-                            user.stats.blackjack.lost += 1;
-                        }
-
-                        await user.save();
-
-                        return interaction.update({
-                            content: `Game finished: ${result.result.toUpperCase()}`,
-                            components: []
-                        });
-                    }
                 }
             }
 
