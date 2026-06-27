@@ -24,13 +24,22 @@ const blackjackGameSchema = new mongoose.Schema({
     },
 
     playerHand: {
-        type: [Number],
+        type: [
+            {
+                value: Number,
+                display: String
+            }
+        ],
         default: []
     },
 
     dealerHand: {
-        type: [Number],
-        default: []
+        type: [
+            {
+                value: Number,
+                display: String
+            }
+        ],
     },
 
     finished: {
