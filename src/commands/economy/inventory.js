@@ -1,26 +1,44 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
-const { getUser } = require("../../services/economyService");
+const {
+    SlashCommandBuilder,
+    EmbedBuilder
+} = require("discord.js");
+
+const Inventory = require("../../database/models/Inventory");
+const ShopItem = require("../../database/models/ShopItem");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("inventory")
-        .setDescription("View your items"),
+        .setDescription("View your inventory"),
 
     async execute(interaction) {
 
-        const user = await getUser(interaction.user.id);
+        const inv = await Inventory.findOne({
+            userId: interaction.user.id
+        }).populate("items.itemId");
 
-        const items = user.inventory;
+        if (!inv || !inv.items.length) {
+            return interaction.reply({
+                content: "Your inventory is empty.",
+                ephemeral: true
+            });
+        }
 
         const embed = new EmbedBuilder()
-            .setTitle("🎒 Your Inventory")
-            .setColor(0x3498db)
+            .setTitle("🎒 Inventory")
+            .setColor(0x95a5a6)
             .setDescription(
-                items.length
-                    ? items.map(i => `**${i.itemId}** x${i.quantity}`).join("\n")
-                    : "You have nothing. Empty. Like your financial decisions."
+                inv.items.map(i => {
+                    const item = i.itemId;
+                    if (!item) return null;
+
+                    return `**${item.name}** x${i.quantity}`;
+                }).filter(Boolean).join("\n")
             );
 
-        return interaction.reply({ embeds: [embed] });
+        return interaction.reply({
+            embeds: [embed],
+            ephemeral: true
+        });
     }
 };

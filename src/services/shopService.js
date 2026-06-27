@@ -1,57 +1,88 @@
 const ShopItem = require("../database/models/ShopItem");
-const EconomyUser = require("../database/models/EconomyUser");
-
-const { getUser } = require("./economyService");
+const Inventory = require("../database/models/Inventory");
 
 // =========================
-// GET SHOP ITEMS
+// GET ALL ITEMS
 // =========================
 async function getShopItems() {
-    return ShopItem.find({ stock: { $ne: 0 } });
+    return ShopItem.find({
+        status: "available"
+    });
 }
 
 // =========================
-// BUY ITEM
+// GET ITEM
 // =========================
-async function buyItem(userId, itemId) {
+async function getItem(itemId) {
+    return ShopItem.findById(itemId);
+}
 
-    const item = await ShopItem.findOne({ itemId });
+// =========================
+// GET USER INVENTORY
+// =========================
+async function getInventory(userId) {
 
-    if (!item) throw new Error("Item not found.");
-    if (item.stock === 0) throw new Error("Item out of stock.");
+    let inv = await Inventory.findOne({ userId });
 
-    const user = await getUser(userId);
-
-    if (user.wallet < item.price) {
-        throw new Error("Not enough Twinkies.");
-    }
-
-    user.wallet -= item.price;
-    user.stats.spent += item.price;
-
-    // inventory handling
-    const existing = user.inventory.find(i => i.itemId === itemId);
-
-    if (existing) {
-        existing.quantity += 1;
-    } else {
-        user.inventory.push({
-            itemId,
-            quantity: 1
+    if (!inv) {
+        inv = await Inventory.create({
+            userId,
+            items: []
         });
     }
 
-    if (item.stock > 0) {
-        item.stock -= 1;
-        await item.save();
+    return inv;
+}
+
+// =========================
+// ADD ITEM TO INVENTORY
+// =========================
+async function addItem(userId, itemId, quantity = 1) {
+
+    const inv = await getInventory(userId);
+
+    const existing = inv.items.find(i => i.itemId.toString() === itemId);
+
+    if (existing) {
+        existing.quantity += quantity;
+    } else {
+        inv.items.push({
+            itemId,
+            quantity
+        });
     }
 
-    await user.save();
+    await inv.save();
 
-    return { user, item };
+    return inv;
+}
+
+// =========================
+// REMOVE ITEM
+// =========================
+async function removeItem(userId, itemId, quantity = 1) {
+
+    const inv = await getInventory(userId);
+
+    const item = inv.items.find(i => i.itemId.toString() === itemId);
+
+    if (!item) return inv;
+
+    item.quantity -= quantity;
+
+    if (item.quantity <= 0) {
+        inv.items = inv.items.filter(i => i.itemId.toString() !== itemId);
+    }
+
+    await inv.save();
+
+    return inv;
 }
 
 module.exports = {
     getShopItems,
-    buyItem
+    getItem,
+    getInventory,
+    addItem,
+    removeItem
 };

@@ -64,12 +64,12 @@ module.exports = {
             .addFields(
                 {
                     name: "Your Hand",
-                    value: game.playerHand.join(", "),
+                    value: game.playerHand.map(c => c.display).join(", "),
                     inline: false
                 },
                 {
                     name: "Dealer Shows",
-                    value: `${game.dealerHand[0]}, ❓`,
+                    value: `${game.dealerHand[0].display}, ❓`,
                     inline: false
                 },
                 {

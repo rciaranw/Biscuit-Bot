@@ -2,20 +2,15 @@ const mongoose = require("mongoose");
 
 const shopItemSchema = new mongoose.Schema({
 
-    itemId: {
+    name: {
         type: String,
         required: true,
         unique: true
     },
 
-    name: {
-        type: String,
-        required: true
-    },
-
     description: {
         type: String,
-        required: true
+        default: "No description provided."
     },
 
     price: {
@@ -25,16 +20,25 @@ const shopItemSchema = new mongoose.Schema({
 
     stock: {
         type: Number,
-        default: -1 // -1 = infinite
+        default: -1
+    },
+
+    status: {
+        type: String,
+        enum: ["available", "disabled"],
+        default: "available"
     },
 
     usable: {
         type: Boolean,
         default: false
+    },
+
+    createdAt: {
+        type: Date,
+        default: Date.now
     }
 
-}, {
-    timestamps: true
 });
 
 module.exports = mongoose.model("ShopItem", shopItemSchema);
