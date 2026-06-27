@@ -5,7 +5,6 @@ const inventoryItemSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-
     quantity: {
         type: Number,
         default: 1
@@ -45,34 +44,24 @@ const economyUserSchema = new mongoose.Schema({
     lastMonthly: Date,
 
     stats: {
-        earned: {
-            type: Number,
-            default: 0
+        earned: { type: Number, default: 0 },
+        spent: { type: Number, default: 0 },
+        robbed: { type: Number, default: 0 },
+        stolen: { type: Number, default: 0 },
+
+        coinflip: {
+            won: { type: Number, default: 0 },
+            lost: { type: Number, default: 0 }
         },
 
-        spent: {
-            type: Number,
-            default: 0
+        blackjack: {
+            won: { type: Number, default: 0 },
+            lost: { type: Number, default: 0 }
         },
 
-        robbed: {
-            type: Number,
-            default: 0
-        },
-
-        stolen: {
-            type: Number,
-            default: 0
-        },
-
-        blackjackWon: {
-            type: Number,
-            default: 0
-        },
-
-        blackjackLost: {
-            type: Number,
-            default: 0
+        slots: {
+            won: { type: Number, default: 0 },
+            lost: { type: Number, default: 0 }
         }
     }
 
