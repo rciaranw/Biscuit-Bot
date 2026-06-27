@@ -23,27 +23,12 @@ const shopItemSchema = new mongoose.Schema({
         required: true
     },
 
-    sellPrice: {
-        type: Number,
-        default: 0
-    },
-
     stock: {
         type: Number,
-        default: -1
-    },
-
-    enabled: {
-        type: Boolean,
-        default: true
+        default: -1 // -1 = infinite
     },
 
     usable: {
-        type: Boolean,
-        default: false
-    },
-
-    consumable: {
         type: Boolean,
         default: false
     }
