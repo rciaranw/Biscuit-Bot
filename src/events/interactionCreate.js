@@ -1,5 +1,4 @@
 console.log("INTERACTION CREATE FILE LOADED.");
-//console.log("COMMAND MAP SIZE:", client.commands?.size);
 
 const {
     ModalBuilder,
@@ -8,37 +7,35 @@ const {
     ActionRowBuilder,
     EmbedBuilder,
     ButtonBuilder,
-    ButtonStyle,
-    ChannelType,
-    PermissionFlagsBits,
-    PermissionOverwrites
+    ButtonStyle
 } = require("discord.js");
 
 const config = require("../utils/config");
 
-const Application = require("../database/models/Application");
-const ApplicationBlacklist = require("../database/models/ApplicationBlacklist");
-const ApplicationSettings = require("../database/models/ApplicationSettings");
-const Punishment = require("../database/models/Punishment");
-
 const { closeTicket } = require("../utils/closeTicket");
-
 const {
     createTicket,
     getOpenTicketForUser,
     formatTicketId
-} = require("../services/ticketService")
+} = require("../services/ticketService");
+
+// Blackjack service
+const {
+    getGame,
+    hit,
+    stand
+} = require("../services/blackjackService");
+
+const { getUser, addWallet } = require("../services/economyService");
 
 module.exports = {
     name: "interactionCreate",
+
     async execute(interaction, client) {
 
         try {
 
-            // =========================
-            // DEBUG (KEEP THIS)
-            // =========================
-            console.log("INTERACTION:", interaction.type, interaction.commandName || interaction.customId);
+            console.log("INTERACTION:", interaction.type, interaction.customId || interaction.commandName);
 
             // =========================
             // SLASH COMMANDS
@@ -48,14 +45,13 @@ module.exports = {
                 const command = client.commands.get(interaction.commandName);
 
                 if (!command) {
-                    console.log("Command not found:", interaction.commandName);
                     return interaction.reply({
                         content: "Command not found.",
                         ephemeral: true
                     });
                 }
 
-                return await command.execute(interaction, client);
+                return command.execute(interaction, client);
             }
 
             // =========================
@@ -64,8 +60,6 @@ module.exports = {
             if (interaction.isStringSelectMenu()) {
 
                 if (interaction.customId !== "ticket_create") return;
-
-                const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require("discord.js");
 
                 const modal = new ModalBuilder()
                     .setCustomId(`ticket_modal_${interaction.values[0]}`)
@@ -89,241 +83,258 @@ module.exports = {
             // =========================
             if (interaction.isModalSubmit()) {
 
-                try {
-                    console.log("MODAL RECEIVED:", interaction.customId);
+                if (!interaction.customId.startsWith("ticket_modal_")) return;
 
-                    if (!interaction.customId.startsWith("ticket_modal_")) return;
+                const type = interaction.customId.replace("ticket_modal_", "");
+                const reason = interaction.fields.getTextInputValue("reason");
 
-                    const type = interaction.customId.replace("ticket_modal_", "");
-                    const reason = interaction.fields.getTextInputValue("reason");
+                const existing = await getOpenTicketForUser(interaction.user.id);
 
-                    console.log("TICKET TYPE:", type);
-                    console.log("REASON:", reason);
-
-                    const existing = await getOpenTicketForUser(interaction.user.id);
-
-                    if (existing) {
-                        return interaction.reply({
-                            content: "You already have an open ticket.",
-                            ephemeral: true
-                        });
-                    }
-
-                    await interaction.deferReply({ ephemeral: true });
-
-                    const ticket = await createTicket({
-                        guildId: interaction.guild.id,
-                        userId: interaction.user.id,
-                        type,
-                        reason,
-                        channelId: null
-                    });
-
-                    console.log("TICKET CREATED IN DB:", ticket.ticketId);
-
-                    const formattedId = formatTicketId(ticket.ticketId);
-
-                    const supportCategory = config.channels.supportCategory;
-
-                    console.log("SUPPORT CATEGORY:", supportCategory);
-
-                    const helperRole = config.roles.communityHelper;
-                    const staffRole = config.roles.staff;
-
-                    const channel = await interaction.guild.channels.create({
-                        name: `ticket-${formattedId}`,
-                        parent: supportCategory,
-
-                        permissionOverwrites: [
-                            {
-                                id: interaction.guild.roles.everyone.id,
-                                deny: ["ViewChannel"]
-                            },
-                            {
-                                id: interaction.user.id,
-                                allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
-                            },
-                            {
-                                id: helperRole,
-                                allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
-                            },
-                            {
-                                id: staffRole,
-                                allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
-                            }
-                        ]
-                    });
-
-                    console.log("CHANNEL CREATED:", channel.id);
-                    console.log("ABOUT TO SEND MESSAGE...");
-
-                    ticket.channelId = channel.id;
-                    await ticket.save();
-
-                    await interaction.editReply({
-                        content: `Ticket created: ${channel}`
-                    });
-
-                    const embed = new EmbedBuilder()
-                        .setColor(0x3498db)
-                        .setTitle(`Support Ticket: ${type}`)
-                        .setDescription("The Staff Team and Community Helpers have been notified of your ticket. Please wait for someone to help you. Please do not ping members of the team.\n\nIf you have any additional information for them, please provide it now.")
-                        .addFields(
-                            {
-                                name: "Ticket ID",
-                                value: `#${formattedId}`,
-                                inline: true
-                            },
-                            {
-                                name: "Opened By",
-                                value: `<@${interaction.user.id}>`,
-                                inline: true
-                            },
-                            {
-                                name: "Reason",
-                                value: reason
-                            }
-                        );
-
-                    const buttons = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`ticket_refer_${formattedId}`)
-                            .setLabel("Refer to Staff")
-                            .setStyle(ButtonStyle.Primary),
-
-                        new ButtonBuilder()
-                            .setCustomId(`ticket_close_${formattedId}`)
-                            .setLabel("Close Ticket")
-                            .setStyle(ButtonStyle.Danger)
-                    );
-
-                    const msg = await channel.send({
-                        content: `<@${interaction.user.id}> <@&${helperRole}>`,
-                        embeds: [embed],
-                        components: [buttons]
-                    });
-
-                    console.log("MESSAGE SENT:", msg.id);
-
-                    return;
-
-                } catch (err) {
-                    console.error("MODAL ERROR:", err);
-
-                    if (interaction.deferred || interaction.replied) {
-                        return interaction.editReply({
-                            content: "Ticket creation failed."
-                        });
-                    }
+                if (existing) {
                     return interaction.reply({
-                        content: "Ticket creation failed.,",
+                        content: "You already have an open ticket.",
                         ephemeral: true
                     });
                 }
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ticket = await createTicket({
+                    guildId: interaction.guild.id,
+                    userId: interaction.user.id,
+                    type,
+                    reason
+                });
+
+                const formattedId = formatTicketId(ticket.ticketId);
+
+                const channel = await interaction.guild.channels.create({
+                    name: `ticket-${formattedId}`,
+                    parent: config.channels.supportCategory,
+
+                    permissionOverwrites: [
+                        {
+                            id: interaction.guild.roles.everyone.id,
+                            deny: ["ViewChannel"]
+                        },
+                        {
+                            id: interaction.user.id,
+                            allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
+                        },
+                        {
+                            id: config.roles.communityHelper,
+                            allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
+                        },
+                        {
+                            id: config.roles.staff,
+                            allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"]
+                        }
+                    ]
+                });
+
+                ticket.channelId = channel.id;
+                await ticket.save();
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`Ticket: ${type}`)
+                    .setDescription(reason)
+                    .setColor(0x3498db);
+
+                const buttons = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`ticket_refer_${formattedId}`)
+                        .setLabel("Refer")
+                        .setStyle(ButtonStyle.Primary),
+
+                    new ButtonBuilder()
+                        .setCustomId(`ticket_close_${formattedId}`)
+                        .setLabel("Close")
+                        .setStyle(ButtonStyle.Danger)
+                );
+
+                await channel.send({
+                    content: `<@${interaction.user.id}> <@&${config.roles.communityHelper}>`,
+                    embeds: [embed],
+                    components: [buttons]
+                });
+
+                return interaction.editReply({
+                    content: `Ticket created: ${channel}`
+                });
             }
+
             // =========================
-            // BUTTONS
+            // BUTTONS (GLOBAL ROUTER)
             // =========================
             if (interaction.isButton()) {
 
-                const Ticket = require("../database/models/Ticket");
-                const config = require("../utils/config");
-                const { closeTicket } = require("../utils/closeTicket");
+                const id = interaction.customId;
 
-                const ticket = await Ticket.findOne({
-                    channelId: interaction.channel.id
-                });
+                // =========================
+                // TICKETS ONLY
+                // =========================
+                if (id.startsWith("ticket_")) {
 
-                if (!ticket) {
-                    return interaction.reply({
-                        content: "Ticket not found.",
-                        ephemeral: true
+                    const Ticket = require("../database/models/Ticket");
+
+                    const ticket = await Ticket.findOne({
+                        channelId: interaction.channel.id
                     });
-                }
 
-                // =========================
-                // REFER
-                // =========================
-                if (interaction.customId.startsWith("ticket_refer_")) {
-
-                    if (ticket.referred) {
+                    if (!ticket) {
                         return interaction.reply({
-                            content: "Already referred.",
+                            content: "Ticket not found.",
                             ephemeral: true
                         });
                     }
 
-                    ticket.referred = true;
-                    await ticket.save();
+                    // REFER
+                    if (id.startsWith("ticket_refer_")) {
 
-                    await interaction.channel.send({
-                        content: `<@&${config.roles.staff}> This ticket has been referred to the Staff Team. Please wait for one of them to respond.`
-                    });
+                        if (ticket.referred) {
+                            return interaction.reply({
+                                content: "Already referred.",
+                                ephemeral: true
+                            });
+                        }
 
-                    return interaction.reply({
-                        content: "Ticket referred.",
-                        ephemeral: true
-                    });
+                        ticket.referred = true;
+                        await ticket.save();
+
+                        await interaction.channel.send({
+                            content: `<@&${config.roles.staff}> Ticket referred.`
+                        });
+
+                        return interaction.reply({
+                            content: "Referred.",
+                            ephemeral: true
+                        });
+                    }
+
+                    // CLOSE
+                    if (id.startsWith("ticket_close_")) {
+
+                        return interaction.reply({
+                            content: "Are you sure?",
+                            ephemeral: true,
+                            components: [
+                                new ActionRowBuilder().addComponents(
+                                    new ButtonBuilder()
+                                        .setCustomId(`ticket_close_confirm_${ticket.ticketId}`)
+                                        .setLabel("Yes")
+                                        .setStyle(ButtonStyle.Danger),
+
+                                    new ButtonBuilder()
+                                        .setCustomId(`ticket_close_cancel_${ticket.ticketId}`)
+                                        .setLabel("No")
+                                        .setStyle(ButtonStyle.Secondary)
+                                )
+                            ]
+                        });
+                    }
+
+                    if (id.startsWith("ticket_close_confirm_")) {
+
+                        await interaction.update({
+                            content: "Closing...",
+                            components: []
+                        });
+
+                        return closeTicket(interaction);
+                    }
+
+                    if (id.startsWith("ticket_close_cancel_")) {
+
+                        return interaction.update({
+                            content: "Cancelled.",
+                            components: []
+                        });
+                    }
+
+                    return;
                 }
 
                 // =========================
-                // CANCEL
+                // BLACKJACK ONLY
                 // =========================
-                if (interaction.customId.startsWith("ticket_close_cancel_")) {
+                if (id.startsWith("bj_")) {
 
-                    return interaction.update({
-                        content: "Ticket close cancelled.",
-                        components: []
-                    });
-                }
+                    const userId = id.split("_")[2];
 
-                // =========================
-                // CONFIRM
-                // =========================
-                if (interaction.customId.startsWith("ticket_close_confirm_")) {
+                    if (interaction.user.id !== userId) {
+                        return interaction.reply({
+                            content: "This is not your game.",
+                            ephemeral: true
+                        });
+                    }
 
-                    await interaction.update({
-                        content: "Closing ticket...",
-                        components: []
-                    });
+                    const game = await getGame(userId);
 
-                    return closeTicket(interaction);
-                }
+                    if (!game) {
+                        return interaction.reply({
+                            content: "Game not found.",
+                            ephemeral: true
+                        });
+                    }
 
-                // =========================
-                // CLOSE BUTTON
-                // =========================
-                if (interaction.customId.startsWith("ticket_close_")) {
+                    // HIT
+                    if (id.startsWith("bj_hit")) {
 
-                    return interaction.reply({
-                        content: "Are you sure you want to close this ticket?",
-                        ephemeral: true,
-                        components: [
-                            new ActionRowBuilder().addComponents(
-                                new ButtonBuilder()
-                                    .setCustomId(`ticket_close_confirm_${ticket.ticketId}`)
-                                    .setLabel("Yes, close it")
-                                    .setStyle(ButtonStyle.Danger),
+                        const total = await hit(game);
 
-                                new ButtonBuilder()
-                                    .setCustomId(`ticket_close_cancel_${ticket.ticketId}`)
-                                    .setLabel("Cancel")
-                                    .setStyle(ButtonStyle.Secondary)
-                            )
-                        ]
-                    });
+                        if (total > 21) {
+
+                            const user = await getUser(userId);
+                            user.stats.blackjack.lost += 1;
+                            await user.save();
+
+                            game.finished = true;
+                            await game.save();
+
+                            return interaction.update({
+                                content: "💥 Bust!",
+                                components: []
+                            });
+                        }
+
+                        return interaction.deferUpdate();
+                    }
+
+                    // STAND
+                    if (id.startsWith("bj_stand")) {
+
+                        const result = await stand(game);
+
+                        const user = await getUser(userId);
+
+                        if (result.result === "win") {
+                            await addWallet(userId, game.bet * 2);
+                            user.stats.blackjack.won += 1;
+                        }
+
+                        if (result.result === "lose") {
+                            user.stats.blackjack.lost += 1;
+                        }
+
+                        await user.save();
+
+                        return interaction.update({
+                            content: `Game finished: ${result.result.toUpperCase()}`,
+                            components: []
+                        });
+                    }
                 }
             }
 
         } catch (err) {
             console.error("INTERACTION ERROR:", err);
 
-            if (interaction.replied || interaction.deferred) return;
-
-            return interaction.reply({
-                content: "Something went wrong.",
-                ephemeral: true
-            });
+            if (!interaction.replied) {
+                return interaction.reply({
+                    content: "Something went wrong.",
+                    ephemeral: true
+                });
+            }
         }
     }
 };
