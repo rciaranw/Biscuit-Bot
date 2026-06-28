@@ -3,27 +3,21 @@ const {
     EmbedBuilder
 } = require("discord.js");
 
-const EconomyUser = require("../../database/models/EconomyUser")
+const EconomyUser = require("../../database/models/EconomyUser");
 
 const {
     jobRegistry,
-    canTakeJob,
-    getJob
+    canTakeJob
 } = require("../../economy/jobs/jobRegistry");
 
 const {
-    applyForJob
-} = require("../../economy/jobs/jobAccessLayer");
+    qualifications
+} = require("../../economy/study/studyEngine");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("jobs")
-        .setDescription("View available jobs or apply for one")
-        .addStringOption(opt =>
-            opt.setName("apply")
-                .setDescription("Apply for a job by ID")
-                .setRequired(false)
-        ),
+        .setDescription("View available careers and requirements"),
 
     async execute(interaction) {
 
@@ -38,92 +32,113 @@ module.exports = {
             });
         }
 
-        const applyJobId = interaction.options.getString("apply");
-
-        // =========================
-        // APPLY MODE
-        // =========================
-        if (applyJobId) {
-
-            const result = await applyForJob(user.userId, applyJobId);
-
-            if (!result.ok) {
-                return interaction.reply({
-                    content: `❌ ${result.reason || "Unable to apply for job"}`,
-                    ephemeral: false
-                });
-            }
-
-            return interaction.reply({
-                content: `✅ You are now working as **${result.job.name}**`
-            });
-        }
-
-        // =========================
-        // VIEW MODE
-        // =========================
-
-        const available = [];
-        const locked = [];
-
-        for (const [id, job] of Object.entries(jobRegistry)) {
-
-            if (canTakeJob(user, id)) {
-                available.push({ id, job });
-            } else {
-                locked.push({ id, job });
-            }
-        }
+        const userJob = user.job?.title || "unemployed";
+        const userQuals = user.qualifications || [];
 
         const embed = new EmbedBuilder()
             .setColor(0x3498db)
-            .setTitle("💼 Job Market")
-            .setDescription("Browse available careers and apply using `/jobs apply:<jobId>`");
+            .setTitle("💼 Career Centre")
+            .setDescription("Browse available careers, requirements, and progression paths. Use `/applyjob` to apply.");
 
-        // AVAILABLE JOBS
-        const availableText = available
-            .slice(0, 10)
-            .map(j => `**${j.job.name}** (\`${j.id}\`) - ${j.job.basePay} Twinkies`)
-            .join("\n");
+        const availableJobs = [];
+        const lockedJobs = [];
+
+        for (const [id, job] of Object.entries(jobRegistry)) {
+
+            const eligible = canTakeJob(user, id);
+
+            const req = job.requirements || {};
+
+            // build requirement text
+            let reqText = [];
+
+            if (req.creditScore) {
+                reqText.push(`Credit Score ${req.creditScore}+`);
+            }
+
+            if (req.qualifications?.length) {
+                const missing = req.qualifications.filter(q => !userQuals.includes(q));
+
+                if (missing.length > 0) {
+                    reqText.push(`Missing Qualifications`);
+                }
+            }
+
+            if (req.assets?.length) {
+                reqText.push(`Assets Required`);
+            }
+
+            const line = {
+                name: job.name,
+                pay: job.basePay,
+                requirements: reqText.length ? reqText.join(", ") : "None",
+                eligible
+            };
+
+            if (eligible) availableJobs.push(line);
+            else lockedJobs.push(line);
+        }
+
+        // =========================
+        // CURRENT JOB
+        // =========================
+        const currentJob = jobRegistry[userJob];
 
         embed.addFields({
-            name: "✅ Available Jobs",
-            value: availableText || "None available",
+            name: "📌 Current Job",
+            value: currentJob
+                ? `**${currentJob.name}**\nLevel: ${user.job?.level || 1} | XP: ${user.job?.experience || 0}`
+                : "Unemployed",
             inline: false
         });
 
-        // LOCKED JOBS (show reason)
-        const lockedText = locked
+        // =========================
+        // AVAILABLE JOBS
+        // =========================
+        const availableText = availableJobs
             .slice(0, 10)
-            .map(j => {
-
-                const req = j.job.requirements || {};
-                let reasons = [];
-
-                if ((req.creditScore || 0) > (user.creditScore || 0)) {
-                    reasons.push(`Credit ${req.creditScore}+`);
-                }
-
-                if (req.qualifications?.length) {
-                    reasons.push(`Qualifications required`);
-                }
-
-                if (req.assets?.length) {
-                    reasons.push(`Assets required`);
-                }
-
-                return `🔒 **${j.job.name}** (\`${j.id}\`) - ${reasons.join(", ")}`;
-            })
-            .join("\n");
+            .map(j =>
+                `✅ **${j.name}**\n💰 ${j.pay} Twinkies\n📌 Requirements: ${j.requirements}`
+            )
+            .join("\n\n");
 
         embed.addFields({
-            name: "🔒 Locked Jobs",
+            name: "🟢 Available Careers",
+            value: availableText || "No jobs available",
+            inline: false
+        });
+
+        // =========================
+        // LOCKED JOBS
+        // =========================
+        const lockedText = lockedJobs
+            .slice(0, 10)
+            .map(j =>
+                `🔒 **${j.name}**\n💰 ${j.pay} Twinkies\n📌 Requirements: ${j.requirements}`
+            )
+            .join("\n\n");
+
+        embed.addFields({
+            name: "🔒 Locked Careers",
             value: lockedText || "None locked",
             inline: false
         });
 
+        // =========================
+        // GUIDANCE
+        // =========================
+        embed.addFields({
+            name: "📘 How to progress",
+            value:
+                "• Use `/study` to unlock qualifications\n" +
+                "• Improve credit score via financial behaviour\n" +
+                "• Apply using `/applyjob`\n" +
+                "• Work using `/work` to gain XP and promotions",
+            inline: false
+        });
+
         embed.setFooter({
-            text: "Use /job to apply instantly"
+            text: "Career progression system active"
         });
 
         return interaction.reply({

@@ -6,34 +6,16 @@ const {
 const EconomyUser = require("../../database/models/EconomyUser");
 
 const {
+    getActiveLoans
+} = require("../../economy/loans/loanEngine");
+
+const {
+    getOverdraftDebt
+} = require("../../economy/overdraft/overdraftEngine");
+
+const {
     getCreditTier
 } = require("../../economy/credit/creditEngine");
-
-const {
-    getLedger
-} = require("../../economy/ledger/ledgerEngine");
-
-const {
-    stocks
-} = require("../../economy/stocks/stockRegistry");
-
-function calculatePortfolioValue(user) {
-
-    if (!user.portfolio) return 0;
-
-    let total = 0;
-
-    for (const [stockId, qty] of Object.entries(user.portfolio)) {
-
-        const stock = stocks[stockId];
-
-        if (!stock) continue;
-
-        total += stock.price * qty;
-    }
-
-    return total;
-}
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -47,10 +29,10 @@ module.exports = {
 
     async execute(interaction) {
 
-        const target = interaction.options.getUser("user") || interaction.user;
+        const targetUser = interaction.options.getUser("user") || interaction.user;
 
         const user = await EconomyUser.findOne({
-            userId: target.id
+            userId: targetUser.id
         });
 
         if (!user) {
@@ -60,30 +42,47 @@ module.exports = {
             });
         }
 
+        // =========================
+        // CORE VALUES
+        // =========================
         const wallet = user.wallet || 0;
         const bank = user.bank || 0;
+        const credit = user.creditScore ?? 50;
 
-        const credit = user.creditScore || 0;
+        // =========================
+        // LOANS
+        // =========================
+        const loans = getActiveLoans(user);
+        const loanDebt = loans.reduce((sum, l) => sum + (l.remaining || 0), 0);
+
+        // =========================
+        // OVERDRAFT
+        // =========================
+        const overdraftDebt = getOverdraftDebt(user);
+
+        // =========================
+        // NET WORTH CALCULATION
+        // =========================
+        const netWorth =
+            wallet +
+            bank -
+            loanDebt -
+            overdraftDebt;
+
+        // =========================
+        // CREDIT TIER
+        // =========================
         const tier = getCreditTier(credit);
 
-        const overdraftArranged = user.overdraft?.arrangedUsed || 0;
-        const overdraftUnarranged = user.overdraft?.unarrangedUsed || 0;
-
-        const loan = user.loans?.find(l => l.status === "active");
-
-        const portfolioValue = calculatePortfolioValue(user);
-
-        const ledger = await getLedger(target.id, 5);
-
-        const assets = user.assets || [];
-
+        // =========================
+        // EMBED
+        // =========================
         const embed = new EmbedBuilder()
-            .setTitle(`📊 Financial Overview — ${target.username}`)
-            .setColor(0x2c3e50)
+            .setColor(0x2ecc71)
+            .setTitle(`💰 Financial Overview - ${targetUser.username}`)
             .addFields(
-
                 {
-                    name: "💰 Wallet",
+                    name: "💵 Wallet",
                     value: `${wallet} Twinkies`,
                     inline: true
                 },
@@ -93,53 +92,42 @@ module.exports = {
                     inline: true
                 },
                 {
-                    name: "📈 Net Worth",
-                    value: `${wallet + bank + portfolioValue} Twinkies`,
+                    name: "📉 Loans",
+                    value: `${loanDebt} Twinkies`,
                     inline: true
                 },
-
                 {
-                    name: "💳 Credit Score",
+                    name: "⚠️ Overdraft",
+                    value: `${overdraftDebt} Twinkies`,
+                    inline: true
+                },
+                {
+                    name: "📊 Net Worth",
+                    value: `${netWorth} Twinkies`,
+                    inline: true
+                },
+                {
+                    name: "🧠 Credit Score",
                     value: `${credit} (${tier})`,
                     inline: true
-                },
-                {
-                    name: "💸 Loan",
-                    value: loan
-                        ? `${loan.repayment - loan.paid} remaining`
-                        : "None",
-                    inline: true
-                },
-                {
-                    name: "🏦 Overdraft",
-                    value: `Arranged: ${overdraftArranged}\nUnarranged: ${overdraftUnarranged}`,
-                    inline: true
-                },
-
-                {
-                    name: "📊 Stocks",
-                    value: `${portfolioValue} Twinkies`,
-                    inline: true
-                },
-                {
-                    name: "🏠 Assets",
-                    value: assets.length
-                        ? assets.join(", ")
-                        : "None",
-                    inline: true
-                },
-                {
-                    name: "📜 Recent Activity",
-                    value: ledger.length
-                        ? ledger.map(l =>
-                            `**${l.type}** ${l.amount}`
-                        ).join("\n")
-                        : "No recent activity"
                 }
             )
             .setFooter({
-                text: "Bank of Biscuit Financial Intelligence"
+                text: "Bank of Biscuit Financial Overview System"
             });
+
+        // =========================
+        // JOB INFO (if exists)
+        // =========================
+        if (user.job && user.job.title && user.job.title !== "unemployed") {
+            embed.addFields({
+                name: "💼 Employment",
+                value: `Job: **${user.job.title}**
+Level: ${user.job.level || 1}
+XP: ${user.job.experience || 0}`,
+                inline: false
+            });
+        }
 
         return interaction.reply({
             embeds: [embed]

@@ -29,6 +29,25 @@ module.exports = {
             console.log("INTERACTION:", interaction.type, interaction.customId || interaction.commandName);
 
             // =========================
+            // AUTOCOMPLETE
+            // =========================
+            if (interaction.isAutocomplete()) {
+
+                const command = client.commands.get(interaction.commandName);
+
+                if (!command?.autocomplete) {
+                    return;
+                }
+
+                try {
+                    return await command.autocomplete(interaction);
+                } catch (err) {
+                    console.error(`Autocomplete error (${interaction.commandName}):`, err);
+                    return;
+                }
+            }
+
+            // =========================
             // SLASH COMMANDS
             // =========================
             if (interaction.isChatInputCommand()) {

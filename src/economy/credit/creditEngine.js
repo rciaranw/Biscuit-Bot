@@ -78,7 +78,7 @@ async function decreaseCredit(user, amount, reason = "Negative financial action"
 
     return user.creditScore;
 }
-
+ 
 /**
  * Apply financial behaviour effects
  */

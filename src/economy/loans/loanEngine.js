@@ -1,138 +1,192 @@
-const EconomyUser = require("../../database/models/EconomyUser");
 const {
-    increaseCredit,
-    decreaseCredit
+    getCreditTier,
+    removeCredit,
+    addCredit
 } = require("../credit/creditEngine");
 
-/**
- * Base loan config
- */
-const loanConfig = {
-
-    maxMultiplier: {
-        poor: 1.2,
-        fair: 2,
-        good: 4,
-        veryGood: 6,
-        excellent: 10
-    },
-
-    interestRates: {
-        poor: 0.25,
-        fair: 0.18,
-        good: 0.12,
-        veryGood: 0.08,
-        excellent: 0.05
-    }
-};
+const {
+    logTransaction
+} = require("../ledger/ledgerEngine");
 
 /**
- * Calculate max loan based on wallet + credit
+ * Maximum loan by credit score
  */
-function calculateMaxLoan(user) {
+function getMaxLoanAmount(user) {
 
-    const tier = user.creditTier || "fair";
-    const multiplier = loanConfig.maxMultiplier[tier] || 1;
+    const score = user.creditScore ?? 650;
 
-    const base = (user.wallet || 0) * multiplier;
+    if (score >= 850) return 25000;
+    if (score >= 800) return 15000;
+    if (score >= 750) return 10000;
+    if (score >= 700) return 7500;
+    if (score >= 650) return 5000;
+    if (score >= 600) return 2500;
+    if (score >= 500) return 1000;
 
-    // minimum floor so poor users still get tiny access
-    return Math.max(100, Math.floor(base));
+    return 0;
 }
 
 /**
- * Apply for loan
+ * Interest rate by score
  */
-async function requestLoan(userId, amount) {
+function getInterestRate(user) {
 
-    const user = await EconomyUser.findOne({ userId });
+    const score = user.creditScore ?? 650;
 
-    if (!user) {
-        return { ok: false, reason: "User not found" };
+    if (score >= 850) return 0.04;
+    if (score >= 800) return 0.05;
+    if (score >= 750) return 0.07;
+    if (score >= 700) return 0.09;
+    if (score >= 650) return 0.12;
+    if (score >= 600) return 0.16;
+
+    return 0.22;
+}
+
+async function takeLoan(user, amount) {
+
+    if (!user.loans) {
+        user.loans = [];
     }
 
-    const tier = user.creditTier || "fair";
-    const maxLoan = calculateMaxLoan(user);
+    const max = getMaxLoanAmount(user);
 
-    if (amount > maxLoan) {
+    if (max <= 0) {
         return {
             ok: false,
-            reason: `Loan denied. Max allowed: ${maxLoan}`
+            reason: "Your credit score is too low to qualify for a loan."
         };
     }
 
-    if (!user.loans) user.loans = [];
+    if (amount > max) {
+        return {
+            ok: false,
+            reason: `Maximum loan available is ${max.toLocaleString()} Twinkies.`
+        };
+    }
 
-    const interest = loanConfig.interestRates[tier];
+    const rate = getInterestRate(user);
 
-    const repayment = Math.floor(amount + (amount * interest));
+    const loan = {
+        id: Date.now().toString(),
+        principal: amount,
+        remaining: amount,
+        interestRate: rate,
+        repayment: Math.ceil((amount * (1 + rate)) / 30),
+        createdAt: new Date(),
+        nextPayment: new Date(Date.now() + (24 * 60 * 60 * 1000)),
+        status: "ACTIVE",
+        repayments: []
+    };
 
-    user.wallet += amount;
+    user.loans.push(loan);
 
-    user.loans.push({
+    user.bank += amount;
+
+    if (!user.stats) user.stats = {};
+
+    user.stats.totalBorrowed = (user.stats.totalBorrowed || 0) + amount;
+
+    logTransaction(user, {
+        type: "LOAN_CREATED",
         amount,
-        interest,
-        repayment,
-        paid: 0,
-        status: "active",
-        createdAt: Date.now()
+        balanceAfter: user.bank,
+        source: "BANK_OF_BISCUIT",
+        meta: {
+            loanId: loan.id,
+            interestRate: rate
+        }
     });
-
-    await user.save();
 
     return {
         ok: true,
-        amount,
-        repayment,
-        interest
+        loan
     };
 }
 
-/**
- * Repay loan
- */
-async function repayLoan(userId, amount) {
+function repayLoan(user, loanId, amount) {
 
-    const user = await EconomyUser.findOne({ userId });
+    const loan = (user.loans || []).find(
+        l => l.id === loanId && l.status === "ACTIVE"
+    );
 
-    if (!user || !user.loans) {
-        return { ok: false, reason: "No loans found" };
+    if (!loan) {
+        return {
+            ok: false,
+            reason: "Loan not found."
+        };
     }
 
-    const activeLoan = user.loans.find(l => l.status === "active");
-
-    if (!activeLoan) {
-        return { ok: false, reason: "No active loan" };
+    if (user.bank < amount) {
+        return {
+            ok: false,
+            reason: "Insufficient bank balance."
+        };
     }
 
-    if ((user.wallet || 0) < amount) {
-        return { ok: false, reason: "Insufficient wallet balance" };
+    user.bank -= amount;
+
+    loan.remaining -= amount;
+
+    loan.repayments.push({
+        amount,
+        paidAt: new Date()
+    });
+
+    logTransaction(user, {
+        type: "LOAN_REPAYMENT",
+        amount: -amount,
+        balanceAfter: user.bank,
+        source: "BANK_OF_BISCUIT",
+        meta: {
+            loanId
+        }
+    });
+
+    if (loan.remaining <= 0) {
+
+        loan.remaining = 0;
+        loan.status = "PAID";
+
+        addCredit(user, 10, "Loan fully repaid");
+
+        return {
+            ok: true,
+            completed: true
+        };
     }
-
-    const { applyOverdraft } = require("../economy/banking/overdraftEngine");
-
-await applyOverdraft(user.userId, amount);
-    activeLoan.paid += amount;
-
-    // fully paid
-    if (activeLoan.paid >= activeLoan.repayment) {
-
-        activeLoan.status = "paid";
-
-        await increaseCredit(user, 10, "Loan fully repaid");
-
-    }
-
-    await user.save();
 
     return {
         ok: true,
-        remaining: Math.max(0, activeLoan.repayment - activeLoan.paid)
+        completed: false
     };
+}
+
+function defaultLoan(user, loanId) {
+
+    const loan = (user.loans || []).find(
+        l => l.id === loanId && l.status === "ACTIVE"
+    );
+
+    if (!loan) return;
+
+    loan.status = "DEFAULTED";
+
+    removeCredit(user, 25, "Loan default");
+}
+
+function getActiveLoans(user) {
+
+    return (user.loans || []).filter(
+        l => l.status === "ACTIVE"
+    );
 }
 
 module.exports = {
-    requestLoan,
+    getMaxLoanAmount,
+    getInterestRate,
+    takeLoan,
     repayLoan,
-    calculateMaxLoan
+    defaultLoan,
+    getActiveLoans
 };

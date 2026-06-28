@@ -1,107 +1,95 @@
 const EconomyUser = require("../../database/models/EconomyUser");
-const config = require("../../utils/config");
-
-const LEDGER_TYPES = {
-    INCOME: "INCOME",
-    EXPENSE: "EXPENSE",
-    TRANSFER: "TRANSFER",
-    LOAN: "LOAN",
-    TAX: "TAX",
-    SHOP: "SHOP",
-    STOCK: "STOCK",
-    OVERDRAFT: "OVERDRAFT",
-    JOB: "JOB",
-    ROB: "ROB"
-};
 
 /**
- * Write ledger entry
+ * =========================
+ * LEDGER STORAGE MODEL
+ * =========================
+ * We store EVERYTHING as immutable entries
  */
-async function writeLedger({
-    userId,
-    type,
-    amount,
-    balanceAfter = null,
-    meta = {},
-    client = null
-}) {
 
-    const user = await EconomyUser.findOne({ userId });
-
-    if (!user) return null;
-
-    if (!user.ledger) user.ledger = [];
-
-    const entry = {
-        type,
-        amount,
-        balanceAfter: balanceAfter ?? user.wallet,
-        meta,
-        timestamp: Date.now()
-    };
-
-    user.ledger.push(entry);
-
-    // cap ledger size
-    if (user.ledger.length > 200) {
-        user.ledger.shift();
+function ensureLedger(user) {
+    if (!user.ledger) {
+        user.ledger = [];
     }
-
-    await user.save();
-
-    // Discord log channel
-    if (client && config.channels?.moneyLogs) {
-
-        const channel = client.channels.cache.get(config.channels.moneyLogs);
-
-        if (channel) {
-            channel.send(
-                `📜 **LEDGER** | <@${userId}> | ${type} | ${amount} Twinkies`
-            );
-        }
-    }
-
-    return entry;
+    return user.ledger;
 }
 
 /**
- * Get recent ledger entries
+ * Add a transaction to ledger
  */
-async function getLedger(userId, limit = 10) {
+function logTransaction(user, entry) {
 
-    const user = await EconomyUser.findOne({ userId });
+    const ledger = ensureLedger(user);
 
-    if (!user) return [];
+    const record = {
+        id: Date.now().toString(),
+        type: entry.type || "UNKNOWN",
+        amount: entry.amount || 0,
+        balanceAfter: entry.balanceAfter ?? null,
+        source: entry.source || "SYSTEM",
+        meta: entry.meta || {},
+        timestamp: Date.now()
+    };
 
-    return (user.ledger || [])
+    ledger.push(record);
+
+    // prevent infinite growth (safety cap)
+    if (ledger.length > 500) {
+        ledger.splice(0, ledger.length - 500);
+    }
+
+    return record;
+}
+
+/**
+ * Get full ledger
+ */
+function getLedger(user, limit = 20) {
+
+    const ledger = ensureLedger(user);
+
+    return ledger
         .slice(-limit)
         .reverse();
 }
 
 /**
- * Snapshot for balance command
+ * Filter ledger by type
  */
-async function getFinancialSnapshot(userId) {
+function getLedgerByType(user, type) {
 
-    const user = await EconomyUser.findOne({ userId });
+    const ledger = ensureLedger(user);
 
-    if (!user) return null;
+    return ledger.filter(l => l.type === type);
+}
+
+/**
+ * Summaries (useful for /econstats later)
+ */
+function getLedgerSummary(user) {
+
+    const ledger = ensureLedger(user);
+
+    let income = 0;
+    let expense = 0;
+
+    for (const entry of ledger) {
+
+        if (entry.amount > 0) income += entry.amount;
+        if (entry.amount < 0) expense += Math.abs(entry.amount);
+    }
 
     return {
-        wallet: user.wallet || 0,
-        bank: user.bank || 0,
-        credit: user.creditScore || 0,
-        overdraft: user.overdraft || null,
-        loans: user.loans || [],
-        portfolio: user.portfolio || {},
-        assets: user.assets || [],
-        ledgerCount: user.ledger?.length || 0
+        totalEntries: ledger.length,
+        income,
+        expense,
+        net: income - expense
     };
 }
 
 module.exports = {
-    writeLedger,
+    logTransaction,
     getLedger,
-    getFinancialSnapshot,
-    LEDGER_TYPES
+    getLedgerByType,
+    getLedgerSummary
 };
