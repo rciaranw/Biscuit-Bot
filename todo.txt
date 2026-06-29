@@ -1,0 +1,54 @@
+PHASE 1
+
+src/
+
+database/models/
+    Citizen.js          ⭐ replaces EconomyUser
+
+lifestyle/
+
+    requirements/
+        requirementEngine.js
+
+    xp/
+        xpEngine.js
+
+    crime/
+        crimeEngine.js
+
+    study/
+        qualificationRegistry.js
+        certificationRegistry.js
+        qualificationEngine.js
+        certificationEngine.js
+
+    careers/
+        careerRegistry.js
+        promotionEngine.js
+        careerEngine.js
+
+    assets/
+        assetRegistry.js
+        assetEngine.js
+
+economy/
+
+    taxation/
+        taxEngine.js
+
+    bank/
+        bankOfBiscuit.js
+
+    investments/
+        investmentEngine.js
+
+    debt/
+        debtEngine.js
+
+    credit/
+        creditEngine.js
+
+
+
+
+PHASE 2
